@@ -1,0 +1,33 @@
+# PyTorch with CUDA 12.1
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# LLM関連
+transformers>=4.35.0
+accelerate>=0.24.0
+# 注意: bitsandbytesはPython 3.13で動作しません
+# Python 3.12以下の場合のみ: pip install bitsandbytes
+# bitsandbytes>=0.41.0
+
+# 音声認識
+faster-whisper>=0.10.0
+
+# 音声合成（edge-tts: Python 3.13対応、Windowsで動作）
+edge-tts>=6.1.0
+
+# UI
+gradio>=4.0.0
+
+# 音声処理
+sounddevice>=0.4.6
+soundfile>=0.12.1
+numpy>=1.24.0
+
+# 自然言語処理
+spacy>=3.7.0
+
+# その他
+sentencepiece>=0.1.99
+protobuf>=4.24.0
+
