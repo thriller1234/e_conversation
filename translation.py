@@ -10,6 +10,8 @@ class TranslationHelper:
             llm_handler: LLMHandlerインスタンス
         """
         self.llm = llm_handler
+        # 翻訳キャッシュ（高速化）
+        self.translation_cache = {}
         # 英語の難易度分析用
         try:
             self.nlp = spacy.load("en_core_web_sm")
@@ -21,7 +23,7 @@ class TranslationHelper:
     
     def translate_to_japanese(self, english_text):
         """
-        LLMを使用して英語を日本語に翻訳
+        LLMを使用して英語を日本語に翻訳（キャッシュ付き）
         
         Args:
             english_text: 翻訳する英語テキスト
@@ -29,7 +31,18 @@ class TranslationHelper:
         Returns:
             日本語訳
         """
-        return self.llm.translate_to_japanese(english_text)
+        # キャッシュをチェック
+        if english_text in self.translation_cache:
+            return self.translation_cache[english_text]
+        
+        # 翻訳を実行
+        translation = self.llm.translate_to_japanese(english_text)
+        
+        # キャッシュに保存（最大1000件まで）
+        if len(self.translation_cache) < 1000:
+            self.translation_cache[english_text] = translation
+        
+        return translation
     
     def extract_difficult_words(self, text, difficulty_threshold=5):
         """
@@ -42,6 +55,13 @@ class TranslationHelper:
         Returns:
             難しい単語のリスト（単語、品詞、見出し語を含む辞書のリスト）
         """
+        # 文字列でない場合は文字列に変換
+        if not isinstance(text, str):
+            if isinstance(text, list):
+                text = " ".join(str(x) for x in text)
+            else:
+                text = str(text)
+        
         if self.nlp is None:
             # spaCyが使えない場合の簡易版
             words = text.split()
