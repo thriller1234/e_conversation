@@ -13,8 +13,7 @@ accelerate>=0.24.0
 # 音声認識
 faster-whisper>=0.10.0
 
-# 音声合成（edge-tts: Python 3.13対応、Windowsで動作）
-edge-tts>=6.1.0
+# 音声合成（PowerShell TTS - 完全オフライン対応、追加の依存関係不要）
 
 # UI
 gradio>=4.0.0
