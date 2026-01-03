@@ -16,11 +16,13 @@ class EnglishConversationApp:
         print("Initializing AI English Conversation System...")
         self.recognizer = SpeechRecognizer(model_size="small")  # 精度向上のためsmallに変更
         self.llm = LLMHandler()
-        self.tts = TextToSpeech()
+        # 音声名を直接指定する場合（Noneの場合は自動検出）
+        self.tts = TextToSpeech(voice=None)
         self.translator = TranslationHelper(self.llm)
         self.conversation_history = []
         self.is_recording = False
         self.audio_buffer = []
+        self.temp_audio_files = []  # 一時音声ファイルのリスト（終了時に削除）
         print("System initialized successfully!")
     
     def process_audio_input(self, audio):
@@ -116,9 +118,21 @@ class EnglishConversationApp:
         self.conversation_history.append({"role": "user", "content": user_text})
         self.conversation_history.append({"role": "assistant", "content": ai_response})
         
-        # 音声合成
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        audio_path = self.tts.speak(ai_response, temp_file.name)
+        # 音声合成（エラー時も会話を続行）
+        audio_path = None
+        try:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            audio_path = self.tts.speak(ai_response, temp_file.name)
+            if audio_path is None:
+                print("⚠️ 音声合成に失敗しましたが、テキスト会話は続行します")
+            else:
+                # 一時ファイルのパスを記録（終了時に削除）
+                self.temp_audio_files.append(audio_path)
+        except Exception as e:
+            import traceback
+            print(f"⚠️ 音声合成エラー: {e}")
+            print(f"トレースバック: {traceback.format_exc()}")
+            print("⚠️ テキスト会話は続行します")
         
         return user_text, ai_response, audio_path
     
@@ -216,9 +230,21 @@ class EnglishConversationApp:
         self.conversation_history.append({"role": "user", "content": user_text})
         self.conversation_history.append({"role": "assistant", "content": ai_response})
         
-        # 音声合成
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        audio_path = self.tts.speak(ai_response, temp_file.name)
+        # 音声合成（エラー時も会話を続行）
+        audio_path = None
+        try:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            audio_path = self.tts.speak(ai_response, temp_file.name)
+            if audio_path is None:
+                print("⚠️ 音声合成に失敗しましたが、テキスト会話は続行します")
+            else:
+                # 一時ファイルのパスを記録（終了時に削除）
+                self.temp_audio_files.append(audio_path)
+        except Exception as e:
+            import traceback
+            print(f"⚠️ 音声合成エラー: {e}")
+            print(f"トレースバック: {traceback.format_exc()}")
+            print("⚠️ テキスト会話は続行します")
         
         return user_text, ai_response, audio_path
     
@@ -517,7 +543,44 @@ def main():
     """
     app = EnglishConversationApp()
     demo = app.create_ui()
-    demo.launch(share=False, server_name="127.0.0.1", server_port=7860, theme=gr.themes.Soft())
+    
+    try:
+        demo.launch(share=False, server_name="127.0.0.1", server_port=7860, theme=gr.themes.Soft())
+    except KeyboardInterrupt:
+        print("\n⚠️ アプリケーションを終了します...")
+    finally:
+        # 一時音声ファイルを削除
+        print("🧹 一時音声ファイルを削除中...")
+        deleted_count = 0
+        for audio_file in app.temp_audio_files:
+            try:
+                if os.path.exists(audio_file):
+                    os.remove(audio_file)
+                    deleted_count += 1
+            except Exception as e:
+                print(f"⚠️ ファイル削除エラー: {audio_file} - {e}")
+        print(f"✅ {deleted_count}個の一時ファイルを削除しました")
+        
+        # 古い一時ファイルも削除（過去のセッションで残ったファイル）
+        try:
+            import glob
+            temp_dir = os.path.join(os.path.expanduser("~"), "AppData", "Local", "Temp")
+            old_files = glob.glob(os.path.join(temp_dir, "tmp*.wav"))
+            old_deleted = 0
+            for old_file in old_files:
+                try:
+                    # 24時間以上古いファイルを削除
+                    import time
+                    file_age = time.time() - os.path.getmtime(old_file)
+                    if file_age > 86400:  # 24時間 = 86400秒
+                        os.remove(old_file)
+                        old_deleted += 1
+                except:
+                    pass
+            if old_deleted > 0:
+                print(f"✅ {old_deleted}個の古い一時ファイルを削除しました")
+        except Exception as e:
+            print(f"⚠️ 古い一時ファイルの削除エラー: {e}")
 
 if __name__ == "__main__":
     main()
