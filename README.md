@@ -132,7 +132,7 @@ python -c "import torch; print(torch.cuda.is_available())"
 
 ## ライセンス
 
-このプロジェクトは教育目的で作成されています。
+このプロジェクトはMITライセンスの下で公開されています。詳細は[LICENSE](LICENSE)ファイルを参照してください。
 
 ## 技術スタック
 
