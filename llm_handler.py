@@ -2,6 +2,96 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import os
 
+try:
+    from huggingface_hub.errors import GatedRepoError
+except ImportError:
+    GatedRepoError = ()  # type: ignore
+
+# プリセット（light=Qwen ゲートなし / balanced・heavy=Meta Llama は HF で利用申請が必要）
+_LLM_PRESETS = {
+    "light": "Qwen/Qwen2.5-1.5B-Instruct",
+    "balanced": "meta-llama/Llama-3.2-3B-Instruct",
+    "heavy": "meta-llama/Llama-3.1-8B-Instruct",
+}
+
+
+def _read_llm_local_only() -> bool:
+    """
+    環境変数 LLM_LOCAL_ONLY。
+    True（既定）: キャッシュからのみ読み込み。False: キャッシュを試し、無ければ Hub から取得。
+    """
+    raw = os.environ.get("LLM_LOCAL_ONLY", "").strip().lower()
+    if raw == "":
+        return True
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    print(f"[LLM] 不明な LLM_LOCAL_ONLY={raw!r}。true として扱います。")
+    return True
+
+
+def _load_tokenizer(model_name: str, try_remote_on_miss: bool):
+    """try_remote_on_miss が False のときはキャッシュのみ。True のときはキャッシュ失敗後に Hub。"""
+    if not try_remote_on_miss:
+        try:
+            return AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+        except Exception as e:
+            raise RuntimeError(
+                f"LLM_LOCAL_ONLY=true: キャッシュにトークナイザー ({model_name}) がありません。"
+                "初回取得時は LLM_LOCAL_ONLY=false を指定してください。"
+            ) from e
+    try:
+        tok = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+        print("✅ トークナイザーをローカルキャッシュから読み込みました")
+        return tok
+    except Exception:
+        print(
+            "⚠️ ローカルキャッシュにトークナイザーが見つかりません。"
+            "Hub からの取得を試みます..."
+        )
+        try:
+            return AutoTokenizer.from_pretrained(model_name, local_files_only=False)
+        except Exception as e2:
+            if _is_gated_or_auth_error(e2):
+                raise RuntimeError(
+                    f"モデル「{model_name}」は Hugging Face でゲート制限されています。"
+                    "モデルページで利用申請を承認されたアカウントで `hf auth login` してください。\n"
+                    "申請不要で試す場合: LLM_PRESET=light "
+                    f"（{_LLM_PRESETS['light']}）"
+                ) from e2
+            raise
+
+
+def _is_gated_or_auth_error(exc: BaseException) -> bool:
+    if GatedRepoError and isinstance(exc, GatedRepoError):
+        return True
+    low = str(exc).lower()
+    return "gated" in low or ("403" in low and "restricted" in low)
+
+
+def resolve_llm_model_name(explicit: str | None = None) -> str:
+    """
+    使用する Hugging Face モデル ID を決定する。
+
+    優先順位:
+    1. 引数 explicit（アプリから直接指定した場合）
+    2. 環境変数 LLM_PRESET（light / balanced / heavy）
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()
+    preset = os.environ.get("LLM_PRESET", "balanced").strip().lower()
+    if preset not in _LLM_PRESETS:
+        print(
+            f"[LLM] 不明な LLM_PRESET={preset!r}。"
+            f"有効: {', '.join(_LLM_PRESETS.keys())}。balanced を使います。"
+        )
+        preset = "balanced"
+    resolved = _LLM_PRESETS[preset]
+    print(f"[LLM] preset={preset} -> {resolved}")
+    return resolved
+
+
 # bitsandbytesの利用可能性を確認
 try:
     import bitsandbytes
@@ -14,33 +104,26 @@ os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "3600"  # 60分に設定
 os.environ["HF_HUB_DOWNLOAD_CHUNK_SIZE"] = "1048576"  # 1MBチャンク（デフォルトより小さい）
 
 class LLMHandler:
-    def __init__(self, model_name="meta-llama/Llama-3.1-8B-Instruct"):
+    def __init__(self, model_name: str | None = None):
         """
         LLMハンドラーの初期化
-        
+
         Args:
-            model_name: 使用するLLMモデル名
+            model_name: 使用する Hugging Face モデル ID。None の場合は
+                resolve_llm_model_name()（環境変数 LLM_PRESET）で決定。
         """
+        model_name = resolve_llm_model_name(model_name)
         print(f"Loading LLM model: {model_name}...")
         print("⚠️ 低速回線対応モード: タイムアウト60分、リトライ機能有効")
-        
-        # トークナイザーの読み込み（オフライン対応）
-        # オフライン環境を検出して、ローカルキャッシュから読み込む
-        try:
-            # まずローカルキャッシュから読み込むことを試みる
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
-                local_files_only=True  # ローカルキャッシュのみ使用
-            )
-            print("✅ トークナイザーをローカルキャッシュから読み込みました")
-        except Exception as e:
-            # ローカルキャッシュにない場合は、ネットワークからダウンロードを試みる
-            print("⚠️ ローカルキャッシュにトークナイザーが見つかりません。ネットワークからダウンロードを試みます...")
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
-                local_files_only=False  # ネットワークからダウンロード
-            )
-        
+        local_only = _read_llm_local_only()
+        try_remote_on_miss = not local_only
+        if local_only:
+            print("[LLM] LLM_LOCAL_ONLY=true（既定）: キャッシュのみ使用。未キャッシュなら LLM_LOCAL_ONLY=false で取得してください。")
+        else:
+            print("[LLM] LLM_LOCAL_ONLY=false: キャッシュを優先し、無ければ Hub から取得します。")
+
+        self.tokenizer = _load_tokenizer(model_name, try_remote_on_miss)
+
         # モデル読み込みの設定（低速回線対応）
         # device_map="auto"はCPUオフロードを引き起こす可能性があるため、
         # 明示的にGPUに配置する設定に変更
@@ -70,34 +153,31 @@ class LLMHandler:
         
         # 初回実行時に不完全なファイルをクリーンアップ
         self._clear_incomplete_files(model_name)
-        
-        # オフライン対応: まずローカルキャッシュから読み込むことを試みる
-        skip_retry = False  # デフォルトはFalse（ネットワークからダウンロードを試みる）
+
+        print("\n📂 ローカルキャッシュからモデルを読み込み中...")
         try:
-            print("\n📂 ローカルキャッシュからモデルを読み込み中...")
-            model_kwargs_offline = model_kwargs.copy()
-            model_kwargs_offline["local_files_only"] = True  # ローカルキャッシュのみ使用
-            self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs_offline)
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name, **{**model_kwargs, "local_files_only": True}
+            )
             print("✅ モデルをローカルキャッシュから読み込みました！")
-            # 推論モードに設定（高速化）
             self.model.eval()
-            # cuDNNの最適化を有効化
             torch.backends.cudnn.benchmark = True
-            # オフライン読み込み成功時は、リトライループをスキップ
-            skip_retry = True
-        except Exception as offline_error:
-            print(f"⚠️ ローカルキャッシュにモデルが見つかりません: {type(offline_error).__name__}")
-            print("📥 ネットワークからダウンロードを試みます...")
-            skip_retry = False
-        
-        # ネットワークからダウンロードが必要な場合のみリトライループを実行
-        if not skip_retry:
+        except Exception as cache_err:
+            if local_only:
+                raise RuntimeError(
+                    f"LLM_LOCAL_ONLY=true: キャッシュにモデル ({model_name}) がありません。"
+                    "初回取得時は LLM_LOCAL_ONLY=false を指定してください。"
+                ) from cache_err
+            print(
+                f"⚠️ ローカルキャッシュにモデルが見つかりません: {type(cache_err).__name__}"
+            )
+            print("📥 Hub からの取得を試みます...")
             for attempt in range(max_retries):
                 try:
                     print(f"\n📥 モデルダウンロード開始（試行 {attempt + 1}/{max_retries}）...")
-                    model_kwargs_online = model_kwargs.copy()
-                    model_kwargs_online["local_files_only"] = False  # ネットワークからダウンロード
-                    self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs_online)
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        model_name, **{**model_kwargs, "local_files_only": False}
+                    )
                     print("✅ モデルのダウンロードが完了しました！")
                     
                     # 推論モードに設定（高速化）
@@ -114,6 +194,12 @@ class LLMHandler:
                     
                     break
                 except (ConnectionResetError, TimeoutError, OSError, Exception) as e:
+                    if _is_gated_or_auth_error(e):
+                        raise RuntimeError(
+                            f"モデル「{model_name}」へのアクセスが拒否されました（ゲート制限または認可）。"
+                            "Hugging Face で利用申請を承認し `hf auth login` するか、"
+                            "LLM_PRESET=light（Qwen・申請不要）を試してください。"
+                        ) from e
                     error_msg = str(e)
                     error_type = type(e).__name__
                     
