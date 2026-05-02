@@ -25,7 +25,7 @@ class EnglishConversationApp:
         self.temp_audio_files = []  # 一時音声ファイルのリスト（終了時に削除）
         print("System initialized successfully!")
     
-    def process_audio_input(self, audio):
+    def process_audio_input(self, audio, feedback_corrections=True):
         """
         音声入力を処理してAI応答を生成
         
@@ -112,7 +112,11 @@ class EnglishConversationApp:
             return "", "", None
         
         # LLM応答生成
-        ai_response = self.llm.generate_response(user_text, self.conversation_history)
+        ai_response = self.llm.generate_response(
+            user_text,
+            self.conversation_history,
+            feedback_corrections=feedback_corrections,
+        )
         
         # 会話履歴に追加
         self.conversation_history.append({"role": "user", "content": user_text})
@@ -206,7 +210,7 @@ class EnglishConversationApp:
         
         return trimmed_audio
     
-    def process_text_input(self, text):
+    def process_text_input(self, text, feedback_corrections=True):
         """
         テキスト入力を処理してAI応答を生成
         
@@ -224,7 +228,11 @@ class EnglishConversationApp:
         user_text = text.strip()
         
         # LLM応答生成
-        ai_response = self.llm.generate_response(user_text, self.conversation_history)
+        ai_response = self.llm.generate_response(
+            user_text,
+            self.conversation_history,
+            feedback_corrections=feedback_corrections,
+        )
         
         # 会話履歴に追加
         self.conversation_history.append({"role": "user", "content": user_text})
@@ -336,6 +344,10 @@ class EnglishConversationApp:
                     label="📚 難しい単語を表示", 
                     value=False
                 )
+                feedback_corrections = gr.Checkbox(
+                    label="✏️ 英語の訂正フィードバック",
+                    value=True,
+                )
             
             with gr.Row():
                 translation_box = gr.Textbox(
@@ -356,7 +368,9 @@ class EnglishConversationApp:
             microphone_state = gr.State(value=None)
             
             # イベントハンドラ
-            def process_conversation(audio, text, history, show_trans, show_word):
+            def process_conversation(
+                audio, text, history, show_trans, show_word, do_feedback
+            ):
                 """
                 会話を処理する関数
                 """
@@ -380,14 +394,18 @@ class EnglishConversationApp:
                             print(f"DEBUG: sample_rate = {sample_rate}, audio_data type = {type(audio_data)}, shape = {audio_data.shape if hasattr(audio_data, 'shape') else 'N/A'}")
                             if audio_data is not None:
                                 if hasattr(audio_data, '__len__') and len(audio_data) > 0:
-                                    user_text, ai_response, audio_path = self.process_audio_input(audio)
+                                    user_text, ai_response, audio_path = self.process_audio_input(
+                                        audio, feedback_corrections=do_feedback
+                                    )
                                     print(f"DEBUG: 音声認識結果: user_text = {user_text}")
                                 else:
                                     print("DEBUG: 音声データが空です")
                         elif isinstance(audio, str):
                             # ファイルパスの場合
                             print(f"DEBUG: ファイルパスから読み込み: {audio}")
-                            user_text, ai_response, audio_path = self.process_audio_input(audio)
+                            user_text, ai_response, audio_path = self.process_audio_input(
+                                audio, feedback_corrections=do_feedback
+                            )
                         else:
                             print(f"DEBUG: 予期しない音声データ形式: {type(audio)}")
                     except Exception as e:
@@ -397,7 +415,9 @@ class EnglishConversationApp:
                         # エラーが発生した場合はテキスト入力にフォールバック
                         if text and text.strip():
                             print("DEBUG: テキスト入力にフォールバック")
-                            user_text, ai_response, audio_path = self.process_text_input(text)
+                            user_text, ai_response, audio_path = self.process_text_input(
+                                text, feedback_corrections=do_feedback
+                            )
                         else:
                             print("DEBUG: エラーが発生し、処理できませんでした")
                             return history, None, "", "", ""
@@ -405,7 +425,9 @@ class EnglishConversationApp:
                 # テキスト入力の処理
                 if not user_text and text and text.strip():
                     print("DEBUG: テキスト入力を処理中...")
-                    user_text, ai_response, audio_path = self.process_text_input(text)
+                    user_text, ai_response, audio_path = self.process_text_input(
+                        text, feedback_corrections=do_feedback
+                    )
                 
                 if not user_text or not ai_response:
                     print(f"DEBUG: 処理結果が空です。user_text = {user_text}, ai_response = {ai_response}")
@@ -437,14 +459,28 @@ class EnglishConversationApp:
             # 送信ボタンのイベント
             submit_btn.click(
                 process_conversation,
-                inputs=[audio_input, text_input, chatbot, show_translation, show_words],
+                inputs=[
+                    audio_input,
+                    text_input,
+                    chatbot,
+                    show_translation,
+                    show_words,
+                    feedback_corrections,
+                ],
                 outputs=[chatbot, audio_output, translation_box, words_box]
             )
             
             # テキスト入力のEnterキーイベント
             text_input.submit(
                 process_conversation,
-                inputs=[audio_input, text_input, chatbot, show_translation, show_words],
+                inputs=[
+                    audio_input,
+                    text_input,
+                    chatbot,
+                    show_translation,
+                    show_words,
+                    feedback_corrections,
+                ],
                 outputs=[chatbot, audio_output, translation_box, words_box]
             )
             
