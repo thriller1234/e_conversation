@@ -230,11 +230,22 @@ class LLMHandler:
                         print("   - キャッシュをクリアして再試行: python clear_hf_cache.py")
                         raise
         
-        # 英会話教師としてのシステムプロンプト
-        self.system_prompt = """You are a friendly English conversation teacher. 
+        # 英会話教師としてのシステムプロンプト（訂正なし・会話のみ）
+        self.system_prompt_conversation_only = """You are a friendly English conversation teacher.
 Have natural conversations with the student to help them improve their English.
 Use clear, natural English at an intermediate level.
 Be encouraging and patient."""
+
+        # 会話のあいだで学習者の英語を優しく訂正する（既定）
+        self.system_prompt_with_correction = """You are a friendly English conversation teacher.
+Have natural, spoken-style conversations with the student in English.
+Use clear English at an intermediate level. Be encouraging and patient.
+
+When the student's message has clear English mistakes (grammar, word choice, spelling, or unnatural phrasing), help them learn:
+- Briefly point out 1-2 of the most important issues (not a long lesson).
+- Say what sounds better and why in one short phrase if helpful.
+- Then continue the conversation naturally so it still feels like a chat, not an exam.
+If their English is already fine for the situation, do not invent mistakes—just reply normally."""
         print("LLM model loaded successfully!")
     
     def _clear_incomplete_files(self, model_name):
@@ -299,19 +310,33 @@ Be encouraging and patient."""
         else:
             print("   ℹ️ 削除する不完全なファイルはありませんでした")
     
-    def generate_response(self, user_input, conversation_history=[]):
+    def generate_response(
+        self,
+        user_input,
+        conversation_history=None,
+        *,
+        feedback_corrections: bool = True,
+    ):
         """
         ユーザー入力に対する応答を生成
         
         Args:
             user_input: ユーザーの入力テキスト
             conversation_history: 会話履歴（オプション）
+            feedback_corrections: True のとき、学習者の英語の誤りを簡潔に訂正してから会話を続ける
         
         Returns:
             AIの応答テキスト
         """
+        if conversation_history is None:
+            conversation_history = []
+        system = (
+            self.system_prompt_with_correction
+            if feedback_corrections
+            else self.system_prompt_conversation_only
+        )
         # 会話履歴を含めてプロンプト作成
-        messages = [{"role": "system", "content": self.system_prompt}]
+        messages = [{"role": "system", "content": system}]
         messages.extend(conversation_history)
         messages.append({"role": "user", "content": user_input})
         
@@ -326,11 +351,13 @@ Be encouraging and patient."""
             attention_mask = (inputs != self.tokenizer.pad_token_id).long().to("cuda")
         
         # 推論パラメータの最適化（高速化・会話速度向上）
+        # 訂正フィードバックがあると応答がやや長くなるため、訂正ありのときだけ上限を少し上げる
+        max_new = 110 if feedback_corrections else 80
         with torch.no_grad():  # 勾配計算を無効化（メモリ節約と高速化）
             outputs = self.model.generate(
                 inputs,
                 attention_mask=attention_mask,  # attention_maskを明示的に設定
-                max_new_tokens=80,  # 120→80に削減（会話速度向上）
+                max_new_tokens=max_new,
                 temperature=0.5,  # 0.6→0.5に削減（より確定的で高速）
                 top_p=0.8,  # 0.85→0.8に削減（高速化）
                 top_k=25,  # 30→25に削減（高速化）
