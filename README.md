@@ -68,7 +68,7 @@ python -m spacy download en_core_web_sm
 
 ```powershell
 $env:LLM_LOCAL_ONLY="false"
-python app.py
+python scripts/app.py
 ```
 
 キャッシュが済んだあと、オフライン運用では `LLM_LOCAL_ONLY=true`（または未設定のまま）にできます。
@@ -99,7 +99,7 @@ python app.py
 ```powershell
 $env:LLM_PRESET="light"
 $env:LLM_LOCAL_ONLY="false"
-python app.py
+python scripts/app.py
 ```
 
 例（高品質・8B、要承認）:
@@ -107,7 +107,7 @@ python app.py
 ```powershell
 $env:LLM_PRESET="heavy"
 $env:LLM_LOCAL_ONLY="false"
-python app.py
+python scripts/app.py
 ```
 
 ### モデルファイルの保存場所（調査用）
@@ -130,11 +130,14 @@ Hugging Face Hub のキャッシュは通常、次のディレクトリにあり
 
 ```
 e_conversation/
-├── app.py
-├── speech_recognition.py
-├── llm_handler.py
-├── text_to_speech.py
-├── translation.py
+├── scripts/
+│   ├── app.py
+│   └── clear_hf_cache.py
+├── src/
+│   ├── speech_recognition.py
+│   ├── llm_handler.py
+│   ├── text_to_speech.py
+│   └── translation.py
 ├── requirements.txt
 └── README.md
 ```
@@ -143,7 +146,7 @@ e_conversation/
 
 - **403 / gated（Llama）**: モデルページで利用申請が承認されているか、`hf auth login` 済みか確認するか、`LLM_PRESET=light` で Qwen に切り替えてください。
 - **キャッシュに無いと言われる（初回）**: `LLM_LOCAL_ONLY=false` で起動して取得してください。
-- **CUDA / メモリ**: より小さいプリセット、または Whisper の `model_size` を小さくする（`speech_recognition.py`）と負荷が下がります。
+- **CUDA / メモリ**: より小さいプリセット、または Whisper の `model_size` を小さくする（`src/speech_recognition.py`）と負荷が下がります。
 - **音声**: 出力デバイスや `sounddevice` のデバイス一覧を確認してください。
 
 ## ライセンス

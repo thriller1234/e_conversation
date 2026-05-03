@@ -1,3 +1,12 @@
+import sys
+from pathlib import Path
+
+# scripts/ から実行するとき、リポジトリ直下の src を import パスに載せる
+_ROOT = Path(__file__).resolve().parent.parent
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
 import gradio as gr
 import sounddevice as sd
 import numpy as np

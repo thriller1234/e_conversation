@@ -72,6 +72,6 @@ if __name__ == "__main__":
     clear_model_cache(model_name)
     
     print("\n" + "=" * 60)
-    print("完了しました。再度 python app.py を実行してください。")
+    print("完了しました。再度 python scripts/app.py を実行してください。")
     print("=" * 60)
 

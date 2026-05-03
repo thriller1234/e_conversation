@@ -227,7 +227,7 @@ class LLMHandler:
                         print(f"   最後のエラー: {error_type}: {error_msg[:200]}")
                         print("\n💡 ヒント:")
                         print("   - ネットワーク接続を確認してください")
-                        print("   - キャッシュをクリアして再試行: python clear_hf_cache.py")
+                        print("   - キャッシュをクリアして再試行: python scripts/clear_hf_cache.py")
                         raise
         
         # 英会話教師としてのシステムプロンプト（訂正なし・会話のみ）
